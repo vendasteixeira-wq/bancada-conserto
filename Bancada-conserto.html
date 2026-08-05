@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bancada de Conserto — Placas de Aparelhos</title>
+    <style>
+        :root {
+            --bg-main: #0f1115; --bg-panel: #1a1d24; --bg-board: #161b22;
+            --border-color: #2d3139; --text-main: #e0e6ed; --text-dim: #8b919e;
+            --neon-green: #00ff9d; --neon-red: #ff3b3b; --neon-yellow: #ffcc00; --neon-blue: #00aaff;
+            --wire-color: #b87333; --wire-active: #ffd700;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Roboto, sans-serif; }
+        body { background: var(--bg-main); color: var(--text-main); height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+        header { background: var(--bg-panel); padding: 12px 15px; display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid var(--border-color); flex-wrap: wrap; gap:8px; }
+        header h1 { font-size: 16px; color: var(--neon-green); letter-spacing: 0.5px; }
+        .status-text { font-family: monospace; font-size: 13px; color: var(--text-dim); display: flex; align-items: center; gap: 8px; }
+        .power-led { width: 12px; height: 12px; border-radius: 50%; background: #333; border: 1px solid #111; transition: all 0.3s; }
+        .power-led.on { background: var(--neon-red); box-shadow: 0 0 10px var(--neon-red); }
+
+        .main-container { display: flex; flex: 1; overflow: hidden; }
+        .schematic-area { flex: 2; background: var(--bg-board); padding: 15px; overflow-y: auto; display: flex; flex-direction: column; align-items: center; }
+        .flow-container { display: flex; flex-direction: column; align-items: center; padding: 15px; background: #000; border: 1px solid var(--border-color); border-radius: 8px; box-shadow: 0 0 20px rgba(0,0,0,0.5); min-width: 230px; }
+        .board-title { text-align:center; margin-bottom:10px; color:var(--neon-yellow); font-size:14px; }
+        
+        .node { padding: 10px 6px; border: 2px solid var(--border-color); border-radius: 6px; background: var(--bg-panel); color: var(--text-main); font-weight: bold; font-family: monospace; font-size: 12px; cursor: pointer; transition: all 0.25s ease; position: relative; width: 200px; text-align: center; margin: 3px 0; line-height: 1.4; }
+        .node:hover { border-color: var(--neon-blue); box-shadow: 0 0 12px rgba(0,170,255,0.25); transform: scale(1.03); }
+        .node.measuring { border-color: var(--neon-green); box-shadow: 0 0 18px rgba(255,205,0,0.4); color: var(--neon-green); transform: scale(1.03); }
+        .node.path { box-shadow: 0 0 8px rgba(0,255,157,0.2); }
+        
+        .wire { width: 5px; height: 24px; background: var(--wire-color); border-radius: 2px; transition: all 0.3s ease; }
+        .wire.active { background: linear-gradient(180deg, #ffd700, #ff8c00); box-shadow: 0 0 8px #ffd700; animation: pulse 1.2s infinite; }
+        .wire.path { background: linear-gradient(180deg, var(--neon-green), #00cc66); box-shadow: 0 0 6px var(--neon-green); }
+        @keyframes pulse { 0% { opacity: 0.8; } 50% { opacity: 1; } 100% { opacity: 0.8; } }
+
+        .node.ac        { border-color: #ff4d4d; color: #ff4d4d; }
+        .node.fuse      { border-color: #ff9900; color: #ff9900; }
+        .node.filter    { border-color: #a855f7; color: #d8b4fe; }
+        .node.bridge    { border-color: #ffcc00; color: #ffcc00; }
+        .node.cap       { border-color: #00cc44; color: #00cc44; }
+        .node.pfc       { border-color: #22c55e; color: #22c55e; }
+        .node.switch    { border-color: #9900ff; color: #cc66ff; }
+        .node.transf    { border-color: #cc6600; color: #ff9933; }
+        .node.fb        { border-color: #ec4899; color: #f472b6; }
+        .node.diode     { border-color: #00aaff; color: #66ccff; }
+        .node.relay     { border-color: #ff6600; color: #ff9933; }
+        .node.output    { border-color: #00ff9d; color: #00ff9d; }
+
+        .tooltip { position: absolute; left: 210px; top: 50%; transform: translateY(-50%); background: #111; border: 1px solid var(--border-color); padding: 5px 8px; border-radius: 4px; font-size: 10px; color: var(--text-dim); white-space: nowrap; opacity: 0; pointer-events: none; transition: opacity 0.2s; z-index: 10; }
+        .node:hover .tooltip { opacity: 1; }
+
+        .tools-panel { flex: 1; background: var(--bg-panel); border-left: 2px solid var(--border-color); display: flex; flex-direction: column; min-width: 340px; }
+        .panel-section { padding: 14px; border-bottom: 1px solid var(--border-color); }
+        .section-title { font-size: 11px; text-transform: uppercase; color: var(--text-dim); margin-bottom: 8px; letter-spacing: 1px; }
+
+        .tool-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .tool-btn { background: var(--bg-main); border: 1px solid var(--border-color); color: var(--text-main); padding: 10px 6px; border-radius: 4px; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 11px; transition: all 0.2s; }
+        .tool-btn:hover { border-color: var(--neon-blue); }
+        .tool-btn.active { background: rgba(0,170,255,0.1); border-color: var(--neon-blue); color: var(--neon-blue); box-shadow: 0 0 6px rgba(0,170,255,0.2); }
+        .tool-icon { font-size: 18px; }
+
+        .range-row { display: flex; gap: 5px; margin-top: 8px; }
+        .range-btn { flex: 1; padding: 5px; font-size: 10px; background: var(--bg-main); border: 1px solid var(--border-color); color: var(--text-dim); border-radius: 4px; cursor: pointer; }
+        .range-btn.active { border-color: var(--neon-green); color: var(--neon-green); background: rgba(0,255,157,0.08); }
+
+        .action-btn { width: 100%; padding: 9px; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; margin-bottom: 6px; font-size: 13px; transition: all 0.2s; }
+        .btn-power { background: var(--neon-red); color: #fff; }
+        .btn-power:hover { background: #cc0000; }
+        .btn-reset { background: var(--neon-yellow); color: #000; margin-top: 4px; }
+        select.action-btn { background: var(--bg-main); border: 1px solid var(--neon-yellow); color: var(--neon-yellow); appearance: none; text-align: center; margin-bottom: 6px; font-size:12px; }
+        select.action-btn option { background: #111; color: #eee; }
+        select.action-btn.blue { border-color: var(--neon-blue); color: var(--neon-blue); margin-bottom: 10px; }
+
+        .instrument-display { background: #000; border: 2px solid var(--border-color); border-radius: 6px; height: 90px; display: flex; flex-direction: column; align-items: center; justify-content: center; font-family: monospace; color: var(--neon-green); text-shadow: 0 0 5px var(--neon-green); margin-bottom: 8px; }
+        .inst-value { font-size: 24px; font-weight: bold; }
+        .inst-mode { font-size: 10px; color: #555; margin-top: 2px; }
+        .inst-compare { font-size: 10px; margin-top: 2px; color: var(--text-dim); }
+
+        .history-box { background: #050505; border: 1px solid var(--border-color); border-radius: 4px; padding: 6px; margin-top: 8px; max-height: 60px; overflow-y: auto; }
+        .history-item { font-size: 10px; font-family: monospace; color: #aaa; line-height: 1.4; }
+
+        .guide-box { background: #050505; border: 1px solid var(--border-color); border-radius: 4px; padding: 8px; margin-top: 8px; font-size: 10.5px; line-height:1.5; max-height: 120px; overflow-y: auto; }
+        .guide-title { color:var(--neon-yellow); font-weight:bold; margin-bottom:4px; }
+
+        .console-area { flex: 1; background: #050505; padding: 10px; overflow-y: auto; font-family: 'Courier New', monospace; font-size: 11px; line-height: 1.6; color: #ccc; min-height: 80px; }
+        .log-success { color: var(--neon-green); }
+        .log-error { color: var(--neon-red); }
+        .log-warning { color: var(--neon-yellow); }
+        .log-info { color: var(--neon-blue); }
+
+        .score-bar { display: flex; justify-content: space-between; font-size: 10px; color: var(--text-dim); margin-top: 4px; }
+
+        @media (max-width: 900px) {
+            .main-container { flex-direction: column; }
+            .tools-panel { border-left: none; border-top: 2px solid var(--border-color); min-width: unset; }
+            .schematic-area { padding: 10px; }
+            .node { width: 180px; font-size: 11px; }
+            .tooltip { display:none; }
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>🔧 BANCADA DE CONSERTO — PLACAS REAIS</h1>
+        <div class="status-text">
+            <div class="power-led" id="ledPower"></div>
+            <span id="statusText">DESLIGADA</span>
+        </div>
+    </header>
+
+    <div class="main-container">
+        <div class="schematic-area">
+            <div class="board-title" id="boardName">Selecione uma Placa</div>
+            <div class="flow-container" id="boardContainer"></div>
+        </div>
+
+        <div class="tools-panel">
+            <div class="panel-section">
+                <div class="section-title">Placa / Aparelho</div>
+                <select id="boardSelector" class="action-btn blue" onchange="loadBoard(this.value)">
+                    <option value="notebook">💻 Fonte de Notebook (19V)</option>
+                    <option value="tv">📺 Fonte / Principal de TV</option>
+                    <option value="arcond">❄️ Placa Inverter Ar-Condicionado</option>
+                    <option value="atx">🖥️ Fonte ATX de PC</option>
+                    <option value="lavar">🧺 Placa Máquina de Lavar</option>
+                    <option value="game">🎮 Fonte de Videogame</option>
+                    <option value="gen">⚡ Fonte Chaveada Genérica</option>
+                </select>
+            </div>
+
+            <div class="panel-section">
+                <div class="section-title">Instrumento de Medição</div>
+                <div class="instrument-display" id="instrumentDisplay">
+                    <div class="inst-value">---</div>
+                    <div class="inst-mode">SELECIONE FERRAMENTA</div>
+                    <div class="inst-compare" id="instCompare"></div>
+                </div>
+                <div class="tool-grid">
+                    <div class="tool-btn" id="tool-mult" onclick="selectTool('multimeter')"><div class="tool-icon">📏</div><span>Multímetro</span></div>
+                    <div class="tool-btn" id="tool-osc" onclick="selectTool('oscilloscope')"><div class="tool-icon">📊</div><span>Osciloscópio</span></div>
+                </div>
+                <div class="range-row" id="rangeRow" style="display:none;">
+                    <button class="range-btn active" data-range="DC">V DC</button>
+                    <button class="range-btn" data-range="AC">V AC</button>
+                    <button class="range-btn" data-range="Ω">Ω / CONT</button>
+                </div>
+                <div class="history-box">
+                    <div class="section-title">Últimas Medições</div>
+                    <div id="historyList"><span style="color:#444;">Nenhuma medição</span></div>
+                </div>
+            </div>
+
+            <div class="panel-section">
+                <div class="section-title">Ações</div>
+                <button class="action-btn btn-power" onclick="togglePower()">⚡ Energizar Placa</button>
+                <select id="defectSelector" class="action-btn" onchange="injectDefect(this.value)">
+                    <option value="none">🧪 Injetar Defeito...</option>
+                </select>
+                <button class="action-btn btn-reset" onclick="resetAll()">🔄 Reiniciar</button>
+                <div class="score-bar">
+                    <span>Medições: <span id="countTotal">0</span></span>
+                    <span>Corretas: <span id="countOk">0</span></span>
+                </div>
+            </div>
+
+            <div class="panel-section">
+                <div class="section-title">📖 Guia de Conserto</div>
+                <div class="guide-box" id="guideBox">Selecione uma placa acima para ver o passo a passo.</div>
+            </div>
+
+            <div class="console-area" id="console">
+                <div class="log-info">> Sistema pronto. Selecione a placa → ligue → meça os pontos!</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentTool = null, currentRange = 'DC', isPowered = false;
+        let currentDefect = null, currentBoard = 'notebook';
+        let history = [], stats = { total: 0, correct: 0 };
+
+        // =====================================================
+        // BANCO DE DADOS COMPLETO — TODAS AS PLACAS
+        // =====================================================
+        const boards = {
+            notebook: {
+                name: 'Fonte de Notebook — Saída 19V',
+                guide: `
+<div class="guide-title">🔧 Passo a Passo de Conserto</div>
+1️⃣ Entrada AC → 127/220V<br>
+2️⃣ Fusível → 0Ω (passa corrente)<br>
+3️⃣ Ponte Retificadora → ~310-320V DC<br>
+4️⃣ Capacitor Principal → 320V DC<br>
+5️⃣ MOSFET → Dreno = 320V, Gate = Pulso<br>
+6️⃣ Transformador → Secundário ~19V AC<br>
+7️⃣ Diodo Saída → 19V DC<br>
+8️⃣ Capacitores Saída → 19V Limpo<br>
+⚠️ Se fusível aberto → NÃO troque só ele! Meça o MOSFET.
+`,
+                nodes: [
+                    {id:'ac',label:'🔌 Entrada AC',class:'ac'},
+                    {id:'fuse',label:'[F1] Fusível',class:'fuse'},
+                    {id:'bridge',label:'Ponte Retificadora',class:'bridge'},
+                    {id:'cap',label:'[C1] Cap. Principal',class:'cap'},
+                    {id:'switch',label:'MOSFET Chaveador',class:'switch'},
+                    {id:'transf',label:'Transformador',class:'transf'},
+                    {id:'diode',label:'Diodo Saída',class:'diode'},
+                    {id:'output',label:'✅ Saída 19V',class:'output'}
+                ],
+                nominal: {
+                    ac:{v:'127V',m:'AC'}, fuse:{v:'0Ω',m:'CONT'}, bridge:{v:'320V',m:'DC'},
+                    cap:{v:'320V',m:'DC'}, switch:{v:'320V',m:'DC'}, transf:{v:'19V',m:'AC'},
+                    diode:{v:'19V',m:'DC'}, output:{v:'19V',m:'DC'}
+                },
+                defects: {
+                    fuse_open:{comp:'fuse',mult:'OL',osc:'0V',mode:'FUSÍVEL ABERTO',log:'Sem passagem de energia. Tensão ZERO em todo o circuito.',tip:'Nunca troque só o fusível! Meça o MOSFET em curto antes.'},
+                    cap_dry:{comp:'cap',mult:'300V DC',osc:'ONDA SERRILHADA',mode:'CAPACITOR SECO',log:'Tensão reduzida + ripple alto. C1 perdendo capacitância.',tip:'Troque o capacitor principal. Confira sempre a tensão do barramento.'},
+                    mosfet_short:{comp:'switch',mult:'0Ω',osc:'0V RETA',mode:'MOSFET EM CURTO',log:'Dreno colado no Source. Provavelmente queimou o fusível.',tip:'MOSFET em curto = troque também o fusível e verifique o CI driver.'},
+                    no_pulse:{comp:'switch',mult:'320V DC',osc:'SEM PULSO',mode:'SEM SINAL NO GATE',log:'Tensão presente mas sem chaveamento. CI driver morto.',tip:'Sem pulso = verifique o CI de controle e seus resistores.'},
+                    diode_short:{comp:'diode',mult:'0Ω',osc:'CURTO',mode:'DIODO EM CURTO',log:'Saída em curto. Tensão zero no secundário.',tip:'Diodo em curto = troque e verifique se não danificou o transformador.'}
+                }
+            },
+
+            tv: {
+                name: 'Fonte de TV — Saídas 5V/12V/24V',
+                guide: `
+<div class="guide-title">🔧 Passo a Passo de Conserto</div>
+1️⃣ 5VSB → Sempre deve ter 5V<br>
+2️⃣ Barramento PFC → ~380-400V DC<br>
+3️⃣ PS-ON → 5V(repouso) → 0V(liga)<br>
+4️⃣ 12V → Placa principal<br>
+5️⃣ 24V → Tela / LEDs<br>
+⚠️ Sem 5VSB = fonte morta. Comece sempre por ele!
+`,
+                nodes: [
+                    {id:'ac',label:'🔌 Entrada AC',class:'ac'},
+                    {id:'fuse',label:'[F1] Fusível',class:'fuse'},
+                    {id:'pfc',label:'PFC Barramento',class:'pfc'},
+                    {id:'sb',label:'5VSB StandBy',class:'output'},
+                    {id:'ps',label:'PS-ON Comando',class:'fb'},
+                    {id:'v12',label:'Saída 12V',class:'output'},
+                    {id:'v24',label:'Saída 24V',class:'output'}
+                ],
+                nominal: {
+                    ac:{v:'220V',m:'AC'}, fuse:{v:'0Ω',m:'CONT'}, pfc:{v:'390V',m:'DC'},
+                    sb:{v:'5.0V',m:'DC'}, ps:{v:'5.0V→0V',m:'DC'}, v12:{v:'12.0V',m:'DC'}, v24:{v:'24.0V',m:'DC'}
+                },
+                defects: {
+                    no_5vsb:{comp:'sb',mult:'0V',osc:'0V',mode:'SEM 5VSB',log:'Fonte auxiliar não inicia. TV sem vida.',tip:'Sem 5VSB = fonte morta. Verifique resistor de partida e CI auxiliar.'},
+                    pfc_low:{comp:'pfc',mult:'310V DC',osc:'ONDA BAIXA',mode:'PFC PARADO',log:'Barramento com 310V (esperado ~390V). Circuito PFC parado.',tip:'Tensão baixa = CI PFC não está funcionando. Tensão instável em todas saídas.'},
+                    no_12v:{comp:'v12',mult:'0V',osc:'0V',mode:'SEM 12V',log:'5VSB OK mas 12V não sobe. Falta comando PS-ON.',tip:'5VSB presente → curte PS-ON ao GND. Se ligar, problema na placa-mãe.'},
+                    v24_ripple:{comp:'v24',mult:'22V DC',osc:'ONDA SERRILHADA',mode:'CAP. SEC 24V',log:'Tensão baixa e instável. Capacitores estufados.',tip:'Troque todos capacitores do estágio de 24V. Confira visualmente estufados.'}
+                }
+            },
+
+            arcond: {
+                name: 'Placa Inverter Ar-Condicionado',
+                guide: `
+<div class="guide-title">🔧 Passo a Passo de Conserto</div>
+1️⃣ Entrada 220V<br>
+2️⃣ Fusível Principal<br>
+3️⃣ Barramento → ~310V DC<br>
+4️⃣ IGBT Gate → Pulso 5-15V<br>
+5️⃣ Saída → Compressor<br>
+⚠️ Fusível queimado = SEMPRE meça IGBT primeiro!
+`,
+                nodes: [
+                    {id:'ac',label:'🔌 Entrada 220V',class:'ac'},
+                    {id:'fuse',label:'[F1] Fusível Principal',class:'fuse'},
+                    {id:'bridge',label:'Ponte Retificadora',class:'bridge'},
+                    {id:'bus',label:'Barramento DC',class:'cap'},
+                    {id:'igbt',label:'IGBT Potência',class:'switch'},
+                    {id:'out',label:'✅ Compressor',class:'output'}
+                ],
+                nominal: {
+                    ac:{v:'220V',m:'AC'}, fuse:{v:'0Ω',m:'CONT'}, bridge:{v:'310V',m:'DC'},
+                    bus:{v:'310V',m:'DC'}, igbt:{v:'310V',m:'DC'}, out:{v:'FUNCIONANDO',m:'AC'}
+                },
+                defects: {
+                    igbt_short:{comp:'igbt',mult:'0Ω',osc:'CURTO',mode:'IGBT EM CURTO',log:'IGBT em curto! Provavelmente queimou o fusível.',tip:'IGBT em curto = troque IGBT + fusível + verifique CI driver. Não ligue sem trocar!'},
+                    bus_low:{comp:'bus',mult:'200V DC',osc:'ONDA SERRILHADA',mode:'BARRAMENTO BAIXO',log:'Tensão baixa. Capacitor principal seco.',tip:'Capacitor principal perdendo valor. Troque C1 e meça novamente.'},
+                    driver_dead:{comp:'igbt',mult:'310V DC',osc:'SEM PULSO',mode:'SEM SINAL DRIVER',log:'Tensão presente mas sem pulso no Gate.',tip:'Sem pulso = CI driver morto. Verifique alimentação do CI e resistores.'},
+                    fuse_blown:{comp:'fuse',mult:'OL',osc:'0V',mode:'FUSÍVEL ABERTO',log:'Sem energia. Tensão zero em todo barramento.',tip:'Fusível aberto = curto grave. Meça IGBT antes de trocar!'}
+                }
+            },
+
+            atx: {
+                name: 'Fonte ATX de PC — 12V/5V/3.3V',
+                guide: `
+<div class="guide-title">🔧 Passo a Passo de Conserto</div>
+1️⃣ 5VSB → Sempre presente (fonte em StandBy)<br>
+2️⃣ PS-ON → GND = liga a fonte<br>
+3️⃣ Barramento → ~320V DC<br>
+4️⃣ +12V / +5V / +3.3V → devem subir<br>
+⚠️ Sem 5VSB = fonte morta. Com 5VSB e sem 12V → verifique PS-ON.
+`,
+                nodes: [
+                    {id:'ac',label:'🔌 Entrada AC',class:'ac'},
+                    {id:'fuse',label:'[F1] Fusível',class:'fuse'},
+                    {id:'cap',label:'Cap. Principal',class:'cap'},
+                    {id:'sb',label:'5VSB StandBy',class:'output'},
+                    {id:'pson',label:'PS-ON',class:'fb'},
+                    {id:'v12',label:'+12V',class:'output'},
+                    {id:'v5',label:'+5V',class:'output'}
+                ],
+                nominal: {
+                    ac:{v:'127V',m:'AC'}, fuse:{v:'0Ω',m:'CONT'}, cap:{v:'320V',m:'DC'},
+                    sb:{v:'5.0V',m:'DC'}, pson:{v:'5.0V→0V',m:'DC'}, v12:{v:'12.0V',m:'DC'}, v5:{v:'5.0V',m:'DC'}
+                },
+                defects: {
+                    no_5vsb:{comp:'sb',mult:'0V',osc:'0V',mode:'SEM 5VSB',log:'StandBy ausente. Fonte não inicia.',tip:'Sem 5VSB = verifique CI auxiliar e resistor de partida.'},
+                    no_pson:{comp:'v12',mult:'0V',osc:'0V',mode:'SEM COMANDO',log:'5VSB OK mas sem 12V. PS-ON não aterrado.',tip:'Aterre PS-ON ao GND. Se ligar, problema na placa-mãe do PC.'},
+                    cap_sec:{comp:'cap',mult:'300V DC',osc:'ONDA SERRILHADA',mode:'CAPACITOR SECO',log:'Barramento com tensão baixa e instável.',tip:'Troque capacitor principal. Tensão baixa = ripple alto.'},
+                    out_ripple:{comp:'v12',mult:'10.5V',osc:'ONDA SERRILHADA',mode:'CAP. SAÍDA SECO',log:'Tensão baixa e instável. Capacitores estufados.',tip:'Olhe visualmente capacitores estufados. Troque todos do estágio de saída.'}
+                }
+            },
+
+            lavar: {
+                name: 'Placa de Máquina de Lavar',
+                guide: `
+<div class="guide-title">🔧 Passo a Passo de Conserto</div>
+1️⃣ Alimentação CI → 5V ou 12V<br>
+2️⃣ Trava de porta → 220V ao acionar<br>
+3️⃣ Válvula entrada → 220V ao encher<br>
+4️⃣ Motor / Bomba → 220V pelo relé<br>
+⚠️ 80% dos defeitos = alimentação do CI ou relé queimado!
+`,
+                nodes: [
+                    {id:'ac',label:'🔌 Entrada 220V',class:'ac'},
+                    {id:'fuse',label:'[F1] Fusível',class:'fuse'},
+                    {id:'zener',label:'Alim. CI (Zener)',class:'cap'},
+                    {id:'ci',label:'✅ CI Principal',class:'output'},
+                    {id:'trava',label:'Relé Trava Porta',class:'relay'},
+                    {id:'valv',label:'Relé Válvula',class:'relay'},
+                    {id:'motor',label:'Relé Motor',class:'relay'}
+                ],
+                nominal: {
+                    ac:{v:'220V',m:'AC'}, fuse:{v:'0Ω',m:'CONT'}, zener:{v:'12.0V',m:'DC'},
+                    ci:{v:'5.0V',m:'DC'}, trava:{v:'220V',m:'AC'}, valv:{v:'220V',m:'AC'}, motor:{v:'220V',m:'AC'}
+                },
+                defects: {
+                    zener_short:{comp:'zener',mult:'0V',osc:'0V',mode:'ZENER EM CURTO',log:'Alimentação do CI em curto. Placa morta.',tip:'Zener em curto = troque zener e verifique o resistor em série.'},
+                    ci_dead:{comp:'ci',mult:'0V',osc:'0V',mode:'SEM ALIM. CI',log:'Tensão baixa presente mas sem 5V.',tip:'Zener OK mas sem 5V → CI regulador morto ou CI principal em curto.'},
+                    relay_trava:{comp:'trava',mult:'0V',osc:'0V',mode:'RELÉ TRAVA RUIM',log:'Comando presente mas sem 220V na saída.',tip:'Relé aciona mas sem tensão → contatos queimados. Troque relé.'},
+                    fuse_blown:{comp:'fuse',mult:'OL',osc:'0V',mode:'FUSÍVEL ABERTO',log:'Sem energia geral.',tip:'Fusível aberto → verifique curto nos relés ou na alimentação.'}
+                }
+            },
+
+            game: {
+                name: 'Fonte de Videogame',
+                guide: `
+<div class="guide-title">🔧 Passo a Passo de Conserto</div>
+1️⃣ Entrada → 127/220V<br>
+2️⃣ Barramento → ~320V DC<br>
+3️⃣ 12V Principal → alimenta tudo<br>
+4️⃣ 5V / 3.3V → processador<br>
+⚠️ Liga e desliga = proteção por curto ou superaquecimento.
+`,
+                nodes: [
+                    {id:'ac',label:'🔌 Entrada AC',class:'ac'},
+                    {id:'fuse',label:'[F1] Fusível',class:'fuse'},
+                    {id:'cap',label:'Cap. Principal',class:'cap'},
+                    {id:'v12',label:'✅ 12V Principal',class:'output'},
+                    {id:'v5',label:'5V',class:'output'},
+                    {id:'prot',label:'Proteção',class:'fb'}
+                ],
+                nominal: {
+                    ac:{v:'127V',m:'AC'}, fuse:{v:'0Ω',m:'CONT'}, cap:{v:'320V',m:'DC'},
+                    v12:{v:'12.0V',m:'DC'}, v5:{v:'5.0V',m:'DC'}, prot:{v:'OK',m:'STATUS'}
+                },
+                defects: {
+                    prot_trig:{comp:'v12',mult:'0V',osc:'PISCA',mode:'PROTEÇÃO ATIVA',log:'Liga e desliga em segundos. Curto na carga.',tip:'Desconecte tudo. Se 12V aparecer → defeito no aparelho, não na fonte.'},
+                    cap_sec:{comp:'cap',mult:'290V DC',osc:'ONDA SERRILHADA',mode:'CAPACITOR SECO',log:'Barramento instável. Tensão baixa.',tip:'Troque capacitor principal. Tensão instável desarma proteção.'},
+                    out_short:{comp:'v5',mult:'0V',osc:'0V',mode:'SAÍDA EM CURTO',log:'5V em curto. Proteção desligou tudo.',tip:'Desconecte o circuito. Se tensão voltar → defeito no aparelho.'},
+                    fuse_blown:{comp:'fuse',mult:'OL',osc:'0V',mode:'FUSÍVEL ABERTO',log:'Sem energia.',tip:'Fusível aberto → curto grave. Meça o chaveamento antes de trocar.'}
+                }
+            },
+
+            gen: {
+                name: 'Fonte Chaveada Genérica (Comutador)',
+                guide: `
+<div class="guide-title">🔧 Passo a Passo de Conserto — Modelo Universal</div>
+1️⃣ ENTRADA → Filtro → Fusível<br>
+2️⃣ PONTE → AC → DC pulsante (~310V)<br>
+3️⃣ CAPACITOR → Barramento liso<br>
+4️⃣ CHAVEAMENTO → Transistor + CI<br>
+5️⃣ TRANSFORMADOR → Isola e reduz<br>
+6️⃣ SAÍDA → Diodo + Capacitores<br>
+7️⃣ REALIMENTAÇÃO → Mantém tensão estável<br>
+⚠️ Sempre comece pela entrada → vá descendo o fluxo!
+`,
+                nodes: [
+                    {id:'ac',label:'🔌 Entrada AC',class:'ac'},
+                    {id:'fuse',label:'[F1] Fusível',class:'fuse'},
+                    {id:'filter',label:'Filtro EMI / NTC',class:'filter'},
+                    {id:'bridge',label:'Ponte Retificadora',class:'bridge'},
+                    {id:'cap',label:'Cap. Barramento',class:'cap'},
+                    {id:'switch',label:'Transistor Chaveador',class:'switch'},
+                    {id:'transf',label:'Transformador',class:'transf'},
+                    {id:'diode',label:'Diodo Saída',class:'diode'},
+                    {id:'fb',label:'Realimentação',class:'fb'},
+                    {id:'output',label:'✅ Saída Estável',class:'output'}
+                ],
+                nominal: {
+                    ac:{v:'127/220V',m:'AC'}, fuse:{v:'0Ω',m:'CONT'}, filter:{v:'220V',m:'AC'},
+                    bridge:{v:'310V',m:'DC'}, cap:{v:'310V',m:'DC'}, switch:{v:'310V',m:'DC'},
+                    transf:{v:'Tensão Baixa',m:'AC'}, diode:{v:'Tensão Saída',m:'DC'},
+                    fb:{v:'AJUSTA',m:'PWM'}, output:{v:'ESTÁVEL',m:'DC'}
+                },
+                defects: {
+                    fuse_open:{comp:'fuse',mult:'OL',osc:'0V',mode:'FUSÍVEL ABERTO',log:'Sem passagem de energia.',tip:'Fusível aberto = curto em algum ponto a frente. Meça antes de trocar.'},
+                    bridge_dead:{comp:'bridge',mult:'150V DC',osc:'MEIA ONDA',mode:'PONTE PARCIAL',log:'Ponte com diodo avariado. Tensão reduzida.',tip:'Meça cada diodo da ponte separadamente. Troque a ponte completa.'},
+                    cap_ripple:{comp:'cap',mult:'280V DC',osc:'ONDA GRANDE',mode:'CAPACITOR SECO',log:'Pouca filtragem. Tensão com ondulação.',tip:'Capacitor seco = troque. Sempre confira visualmente estufados.'},
+                    no_feedback:{comp:'fb',mult:'VARIA',osc:'INSTÁVEL',mode:'SEM REALIMENTAÇÃO',log:'Tensão sobe ou cai sem controle.',tip:'Sem realimentação = verifique optoacoplador e TL431. Tensão pode subir e queimar tudo!'},
+                    diode_open:{comp:'diode',mult:'0V',osc:'0V',mode:'DIODO ABERTO',log:'Sem retificação. Tensão não chega à saída.',tip:'Diodo aberto = passa pulso nem um sentido. Troque o diodo.'}
+                }
+            }
+        };
+
+        // =====================================================
+        // FUNÇÕES DO SISTEMA
+        // =====================================================
+        function log(msg, type='') {
+            const c = document.getElementById('console');
+            c.innerHTML += `<div class="log-${type||'info'}">> ${msg}</div>`;
+            c.scrollTop = c.scrollHeight;
+        }
+
+        function addHistory(comp, val, nom) {
+            history.unshift({comp,val,nom});
+            if(history.length>5) history.pop();
+            document.getElementById('historyList').innerHTML = history.map(h=>
+                `<div class="history-item">${h.comp.toUpperCase()}: ${h.val} (esp: ${h.nom})</div>`
+            ).join('');
+        }
+
+        function updateStats(ok) {
+            stats.total++; if(ok) stats.correct++;
+            document.getElementById('countTotal').textContent = stats.total;
+            document.getElementById('countOk').textContent = stats.correct;
+        }
+
+        function updateDisplay(val, mode, nom='') {
+            document.querySelector('.inst-value').textContent = val;
+            document.querySelector('.inst-mode').textContent = mode;
+            document.getElementById('instCompare').textContent = nom?`Esperado: ${nom}`:'';
+        }
+
+        function clearVisuals() {
+            document.querySelectorAll('.node').forEach(n=>n.classList.remove('measuring','path'));
+            document.querySelectorAll('.wire').forEach(w=>w.classList.remove('path'));
+        }
+
+        function highlightPath(idx) {
+            document.querySelectorAll('.node').forEach((n,i)=>{if(i<=idx)n.classList.add('path');});
+            document.querySelectorAll('.wire').forEach((w,i)=>{if(i<idx)w.classList.add('path');});
+        }
+
+        function selectTool(tool) {
+            currentTool = tool;
+            currentRange = 'DC';
+            document.querySelectorAll('.range-btn').forEach(b=>b.classList.remove('active'));
+            document.querySelector('[data-range="DC"]').classList.add('active');
+            clearVisuals();
+            document.getElementById('tool-mult').classList.toggle('active', tool==='multimeter');
+            document.getElementById('tool-osc').classList.toggle('active', tool==='oscilloscope');
+            document.getElementById('rangeRow').style.display = tool==='multimeter'?'block':'none';
+            updateDisplay('---', tool==='multimeter'?'MULTÍMETRO':'OSCILOSCÓPIO','');
+            log(`${tool==='multimeter'?'📏 Multímetro':'📊 Osciloscópio'} selecionado. Clique em um ponto.`, 'info');
+        }
+
+        document.addEventListener('click', e=>{
+            if(e.target.classList.contains('range-btn')) {
+                document.querySelectorAll('.range-btn').forEach(b=>b.classList.remove('active'));
+                e.target.classList.add('active');
+                currentRange = e.target.dataset.range;
+                log(`Faixa: ${currentRange}`, 'info');
+            }
+        });
+
+        function togglePower() {
+            isPowered = !isPowered;
+            const led = document.getElementById('ledPower');
+            const st = document.getElementById('statusText');
+            const btn = document.querySelector('.btn-power');
+            document.querySelectorAll('.wire').forEach(w=>w.classList.toggle('active', isPowered));
+            if(isPowered) {
+                led.classList.add('on'); st.textContent='ENERGIZADA'; st.style.color='var(--neon-red)';
+                btn.textContent='🔌 Desligar Placa';
+                log('⚠️ PLACA ENERGIZADA — Tome cuidado! Pontos com alta tensão.', 'warning');
+            } else {
+                led.classList.remove('on'); st.textContent='DESLIGADA'; st.style.color='var(--text-dim)';
+                btn.textContent='⚡ Energizar Placa';
+                log('Placa desligada com segurança.', 'info');
+                updateDisplay('---','DESLIGADA','');
+                clearVisuals();
+            }
+        }
+
+        function resetAll() {
+            if(isPowered) togglePower();
+            document.getElementById('defectSelector').value='none';
+            currentDefect=null; history=[]; stats={total:0,correct:0};
+            document.getElementById('historyList').innerHTML='<span style="color:#444;">Nenhuma medição</span>';
+            document.getElementById('countTotal').textContent='0';
+            document.getElementById('countOk').textContent='0';
+            document.getElementById('console').innerHTML='<div class="log-info">> Reiniciado. Selecione placa → ligue → meça.</div>';
+            updateDisplay('---','AGUARDANDO','');
+            clearVisuals();
+        }
+
+        function loadBoard(id) {
+            currentBoard=id;
+            const b=boards[id];
+            document.getElementById('boardName').textContent=b.name;
+            document.getElementById('guideBox').innerHTML=b.guide;
+
+            let html='';
+            b.nodes.forEach((n,i)=>{
+                const nom = b.nominal[n.id];
+                const tip = nom?`<div class="tooltip">Nominal: ${nom.v} ${nom.m}</div>`:'';
+                html += `<div class="node ${n.class}" onclick="measureComponent('${n.id}')">${n.label}${tip}</div>`;
+                if(i<b.nodes.length-1) html += `<div class="wire ${isPowered?'active':''}"></div>`;
+            });
+            document.getElementById('boardContainer').innerHTML=html;
+
+            const sel=document.getElementById('defectSelector');
+            sel.innerHTML='<option value="none">🧪 Injetar Defeito...</option>';
+            for(const [k,v] of Object.entries(b.defects))
+                sel.innerHTML += `<option value="${k}">${v.mode}</option>`;
+
+            currentDefect=null;
+            history=[]; document.getElementById('historyList').innerHTML='<span style="color:#444;">Nenhuma medição</span>';
+            if(isPowered) togglePower();
+            log(`✅ ${b.name} carregada. ${b.nodes.length} pontos de medição.`, 'success');
+        }
+
+        function injectDefect(id) {
+            if(id==='none') {
+                currentDefect=null;
+                log('✅ Placa restaurada. Todos os componentes em perfeito estado.', 'success');
+                if(isPowered) togglePower();
+                return;
+            }
+            currentDefect = boards[currentBoard].defects[id];
+            log(`❌ DEFEITO: ${currentDefect.mode}`, 'error');
+            log(`💡 Dica: ${currentDefect.tip}`, 'info');
+            if(isPowered) togglePower();
+        }
+
+        function measureComponent(comp) {
+            if(!currentTool) { log('❌ Selecione Multímetro ou Osciloscópio!', 'error'); return; }
+            if(!isPowered) { log('❌ Ligue a placa primeiro! Botão ⚡ Energizar.', 'error'); return; }
+
+            const b=boards[currentBoard];
+            const ord = b.nodes.map(n=>n.id);
+            const idx = ord.indexOf(comp);
+            clearVisuals(); highlightPath(idx);
+
+            const nom = b.nominal[comp];
+            if(!nom) { log('⚠️ Ponto desconhecido.', 'warning'); return; }
+
+            let val=nom.v, mode=nom.m, msg='', type='success', ok=true;
+
+            if(currentDefect) {
+                const dIdx = ord.indexOf(currentDefect.comp);
+                const corte = ['FUSÍVEL ABERTO','ABERTO','SEM ENERGIA','SEM 5VSB','SEM 12V','SEM COMANDO'];
+
+                if(currentDefect.comp === comp) {
+                    ok=false; type='error';
+                    val = currentTool==='multimeter' ? currentDefect.mult.split(' ')[0] : currentDefect.osc;
+                    mode = currentDefect.mode;
+                    msg = `📍 ${comp.toUpperCase()}: MEDIDO = ${val} | ESPERADO = ${nom.v} → ${currentDefect.log}`;
+                    if(currentDefect.tip) msg += ` | 💡 ${currentDefect.tip}`;
+                } else if(dIdx >=0 && dIdx < idx && corte.some(s=>currentDefect.mode.includes(s))) {
+                    ok=false; type='warning';
+                    val='0V'; mode='SEM ENERGIA';
+                    msg = `📍 ${comp.toUpperCase()}: MEDIDO = 0V | ESPERADO = ${nom.v} → Sem energia! Defeito em ${ord[dIdx].toUpperCase()} antes deste ponto.`;
+                } else {
+                    msg = `📍 ${comp.toUpperCase()}: ${nom.v} ${nom.m} ✅ Componente OK.`;
+                }
+            } else {
+                msg = `📍 ${comp.toUpperCase()}: ${nom.v} ${nom.m} ✅ Valor nominal. Componente em bom estado.`;
+            }
+
+            updateStats(ok);
+            addHistory(comp, `${val} ${mode}`, `${nom.v} ${nom.m}`);
+            updateDisplay(val, mode, `${nom.v} ${nom.m}`);
+            log(msg, type);
+        }
+
+        window.onload = () => loadBoard('notebook');
+    </script>
+</body>
+</html>
